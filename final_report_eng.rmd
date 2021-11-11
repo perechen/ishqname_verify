@@ -1,0 +1,153 @@
+---
+title: "ENG Верификация авторства поэмы «Ишк̣-нāме»"
+output: html_document
+bibliography: ishqname.bib
+---
+
+```{r setup, include=FALSE}
+library(tidytext)
+library(tidyverse)
+library(proxy)
+library(kableExtra)
+library(stylo)
+library(paletteer)
+library(rethinking)
+knitr::opts_chunk$set(echo = F,eval=T)
+
+```
+
+We turn to modern multivariate stylometry to see if computational models would provide an additional evidence for disputed authorship. We will rely on the frequencies of the most frequent words as reliable features of stylistic identity, as it was demonstrated an abundance of times (see e.g. [@evert_understanding_2017] ). The use of so-called "function words" from the top of the word frequency list often significantly varies among individuals which allows to distinguish their mostly unconscious writing habits, or stylistic signatures ([@kestemont_function_2014]). However, in the case of attributing poetic texts the main problem often encountered is the insufficient text size: robust lexical patterns do not have space to express themselves in short texts [@eder_short_2017]. Recent research in versification increases reliability of attribution by adding formal features of verse - like rhythm patterns and rhyme composition [@plechac_versification_2021]. However, the lexical-based attribution even in short poetry samples still remains relevant. Given availability of relatively large samples (~5000 words) in our scenario, we proceed with the simplest setup possible. In all experiments we rely on `stylo` library for R software [@eder_stylometry_2016], wrapping its functions in custom-made experimental scenarios.
+
+The only plausible candidate for the authorship of "Book of Love" in our corpus of poetic texts is Sanayi. This means that the main goal of stylometry experiments is *verification* of authorship, instead of *attribution*. Attribution setup usually has closed set of candidates to which an unknown text is being attributed. In verification, which is usually considered more general task, a goal is to verify if a text could have been written by the only "suspect" author [@halvani_assessing_2019]. We use other poets as a set of "impostors", a background against which stylistic features of Sanayi and "Book of Love" would be matched. Following table provides text size summaries (in number of tokens / words).
+
+
+
+
+```{r}
+files = list.files("data/corpus_full/", full.names = T)
+
+## document lengths
+
+summary = tibble(title = files, text = sapply(files, read_file)) %>% 
+  mutate(title = str_replace_all(title, "data/corpus_full//(.*?).txt", "\\1")) %>% 
+  group_by(title) %>% 
+  unnest_tokens(input=text, output=word, token="words") %>% 
+  count(title)
+
+knitr::kable(summary) %>% kable_styling(full_width = F)
+
+```
+
+The minimal text size in the corpus is 5000 words. This would serve as a natural limit for our sampling strategies, so that all experiments would use comparable sample sizes. Another concern is metrical heterogeneity of the corpus. Three texts are written in *hazadzh*, four - in hafif. Iraqi's Diwan includes poems of various meters. If we remove it and do the exploratory clustering  of texts (frequencies of 400 most frequent words, classic Delta distance [@burrows_delta:_2002], Ward's linkage), then our texts will be distributed across two metrical "hyperclusters".
+
+
+```{r include=FALSE}
+set.seed(189)
+png('plots_pub/fig1.tiff',width = 1200, height=900,res=300,pointsize = 6)
+res = stylo(gui=F,
+            corpus.dir = "data/corpus",
+            analyzed.features = "w",
+            ngram.size = 1,
+            mfw.min=400,
+            mfw.max=400, 
+            distance.measure="delta",
+            culling.min=0,
+            culling.max=0,
+            sampling="no.sampling",
+            sample.size=5000,
+            analysis.type = "CA",
+            corpus.lang="Other",
+            plot.custom.height = 6,
+            plot.custom.width = 8,
+            add.to.margins=2,
+            plot.font.size = 5)
+dev.off()
+```
+![](00000f.png)
+
+```{r include=F}
+
+```
+
+
+To minimize future structural bias that is introduced with meter, we might want to remove features (words) that are mostly associated with the metrical groups. We do it by correlating features of texts with their metrical classes.
+
+```{r,fig.height=18,fig.width=6}
+features = res$table.with.all.zscores %>% as.data.frame()
+
+classes = c(2,1,2,1,1,1,2) %>% as.factor()
+fin = cbind(as.data.frame(classes), features)
+
+
+## association of categories with features
+description = FactoMineR::catdes(fin,num.var=1)
+
+signif(description$quanti.var[1:10,], digits = 2)
+
+hafif = description$quanti[[1]] %>% as_tibble(rownames = "word")
+hazadzh = description$quanti[[2]] %>% as_tibble(rownames = "word")
+
+## features that drive hafif / hazadzh difference
+haf = hafif %>% filter(v.test > 0) %>% select(word, v.test) %>% mutate(meter = "hafif")
+haz = hazadzh %>% filter(v.test > 0) %>% select(word, v.test) %>% mutate(meter ="hazadzh")
+
+
+## plot features with p > 0.05
+
+haf %>% bind_rows(haz) %>% mutate(v.test = ifelse(meter == "hafif", -v.test, v.test)) %>% ggplot(aes(x=v.test, y=reorder(word,-v.test),fill=meter)) + geom_col() + theme_minimal() + labs(y = "", x="") + scale_fill_paletteer_d("wesanderson::GrandBudapest1") + theme(axis.text.y = element_text(size=12))
+```
+
+In following experiments these words are excluded to counter the natural similarity of same-meter texts to each other. This would not neutralize the global effect of poetic meter on natural language, but at least some control over these features is important.
+
+For a start, we want to test our experimental method in "ground truth" cases where there is no doubt in true authorship of a text. To do this, we take Iraqi and Sanayi, since they are the only authors in our corpus that have two different texts. We want to test how random samples of 5000 words are recognized as samples "of the same author". We use a method known as "general impostors" [@kestemont_authenticating_2016]: it is an iterative attribution of a fragment X to all other authors in the corpus (including the one who actually wrote X). The confidence in attribution is expressed as a proportion of cases in which the fragment was the nearest neighbor to author A, as a results of N iterations. Here we run each of 20 indepdendent sample pools of 5000 words per each text 1000 times across all texts in corpus (excluding the "Book of Love").
+
+Results for Iraqi's Diwan. 
+
+```{r,fig.width=8,fig.height=6}
+iraqi_v = readRDS("data/iraqi_verify.rds")
+sanayi_v = readRDS("data/sanayi_verify.rds")
+
+bind_rows(iraqi_v) %>% pivot_longer(c(1:5), names_to="impostor", values_to="threshold") %>% group_by(impostor) %>% mutate(mean_coef = mean(threshold)) %>%  ggplot(aes(reorder(impostor, -mean_coef), threshold,group=impostor)) + geom_boxplot() + labs(x="", y="Confidence", title="Verification of Iraqi (20 samples, 5000 words each х 1000 iterations)") + theme_minimal()
+
+ggsave("plots_pub/fig2_iraqi.tiff",width = 8,height = 6,dpi = 300)
+
+```
+
+Boxplots show the distribution of confidence values after each of 20 seris of 1000 iterations. Vertical line shows median value, boxes 50% range of all values, whiskers - 95% percentile. Despite significant variation in samples, Iraqi remains the only plausible candidate for an authorship of the Diwan (which we know he wrote).
+
+Results for Sanayi (in each sampling round the Sanayi poem for verification was chosen randomly)
+
+```{r,fig.width=8,fig.height=6}
+bind_rows(sanayi_v) %>% pivot_longer(c(1:5), names_to="impostor", values_to="threshold") %>% group_by(impostor) %>% mutate(mean_coef = mean(threshold)) %>%  ggplot(aes(reorder(impostor, -mean_coef), threshold,group=impostor)) + geom_boxplot() + labs(x="", y="Confidence", title="Sanayi verification (20 samples, 5000 words each х 1000 iterations)") + theme_minimal()
+
+ggsave("plots_pub/fig3_sanayi.tiff",width = 8,height = 6,dpi = 300)
+```
+
+The current setup of the corpus and sample size, as it is evident, is far from being certain about true authorship. However, the tendency to verify a text against it's true author is there. We certainly pick upon *some* authorial signal.
+
+Now we can repeat the verification with "Book of Love" being included. Instead of 20 random samples of 5000 words, we take 100 and repeat 1000 iterations for each. In each iteration features for analysis is also picked randomly, algorithm takes between 50% and 90% of the 500 most frequent words. In same fashion, a distance measurement is picked randomly in each series of the experiment (classic delta, cosine delta, min-max).
+
+```{r, fig.width=8, fig.height=6}
+list_of_results = readRDS("data/100_test_fin.rds")
+
+bind_rows(list_of_results) %>% pivot_longer(c(1:5), names_to="impostor", values_to="threshold") %>% group_by(impostor) %>% mutate(mean_coef = mean(threshold)) %>%  ggplot(aes(reorder(impostor, -mean_coef), threshold,group=impostor)) + geom_boxplot() + labs(x="", y="Confidence", title="Verification of 'The Book of Love': 100 samples, 5000 words х 5000 iterations") + theme_minimal()
+
+ggsave("plots_pub/fig4_verify.tiff", width = 8, height = 6)
+```
+
+Our primary (and only) candidate for the authorship of "Book of Love" is Sanayi and he even loses the competition to Iraqi, who is not even considered a plausible candidate. It is important to note, that the method that is used here will always assign a nearest neighbor to a text without any estimation how "true" this assignment is. The high uncertainty and dispersion of our results could be seen as indicative of the lack of a true author in the corpus. Then, the "similarity" of "Book of Love" to Iraqi and Sanayi might be driven by other factors, like meter or theme (or both). In any case, the results show that probability of Sanayi being an author of "Book of Love" is small - this does not mean, it is non-existent. As we shown, our certainty in this experimental scenario is limited.
+
+We can try to visualize the processes behind verification experiments. To do this, we calculate distances between two random samples taken from "true" Sanayi, using different most frequent word cutoffs for analysis. Resulting average distances then are compared to sets of distances between "true" Sanayi and others authors in the corpus. This gives us an an estimation of how same-author samples from uncontested Sanayi behave compared to other-author samples. Using these results as a "map" of same vs. other author similarity, we add distances from samples from "Book of Love" to samples from Sanayi. We can now see how the contested poem behaves: as Sanayi text (the curve is close to curve of Sanayi vs. Sanayi distances), or text plausibly written by someone else (the curve is close to Sanayi vs. others distances)
+
+```{r,message=F,warning=F}
+unmask_mfw = readRDS("data/unmasking_manual.rds")
+unmask_mfw %>% group_by(target,mfw) %>% mutate(type = case_when(target == "Ishqname" ~ "Ishqname",target == "Sanayi" ~ "same author",T ~ "other")) %>% mutate(pi_lower = PI(distance)[1], pi_upper = PI(distance)[2]) %>%
+#  filter(target != "Iraqi_hafif") %>%
+  group_by(target,mfw, pi_lower, pi_upper,type) %>%
+  summarise(mean_dist = mean(distance),.groups = "keep") %>%
+  ggplot(aes(x=mfw, y=mean_dist,group=target,color=type)) + geom_line(aes(linetype=type),size=0.6) + geom_ribbon(data = . %>% filter(target %in% c("Sanayi", "Ishqname")),aes(ymin=pi_lower,ymax=pi_upper,group=target,color=NULL),alpha=0.1) + theme_minimal() + scale_color_paletteer_d("wesanderson::GrandBudapest1")
+
+ggsave("plots_pub/fig5_distances.tiff",width = 8,height = 6)
+```
+
+The lines on a plot show average distances, grey zone is 95% percentile interval of the distance distribution. 100 distance calculations were made in each MFW cutoff. Red lines are the distances of "other authors" to Sanayi, while the golden line shows distances between "Book of Love" and Sanayi. The golden line quickly leaves the space of Sanayi plausibility and approaches distances of "others" (Iraqi and Shirazi).
