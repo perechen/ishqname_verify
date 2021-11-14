@@ -95,6 +95,8 @@ haz = hazadzh %>% filter(v.test > 0) %>% select(word, v.test) %>% mutate(meter =
 ## plot features with p > 0.05
 
 haf %>% bind_rows(haz) %>% mutate(v.test = ifelse(meter == "hafif", -v.test, v.test)) %>% ggplot(aes(x=v.test, y=reorder(word,-v.test),fill=meter)) + geom_col() + theme_minimal() + labs(y = "", x="") + scale_fill_paletteer_d("wesanderson::GrandBudapest1") + theme(axis.text.y = element_text(size=12))
+
+ggsave("plots_pub/figS2_meter_diff.tiff",width = 5,height = 10)
 ```
 
 In following experiments these words are excluded to counter the natural similarity of same-meter texts to each other. This would not neutralize the global effect of poetic meter on natural language, but at least some control over these features is important.
@@ -151,3 +153,26 @@ ggsave("plots_pub/fig5_distances.tiff",width = 8,height = 6)
 ```
 
 The lines on a plot show average distances, grey zone is 95% percentile interval of the distance distribution. 100 distance calculations were made in each MFW cutoff. Red lines are the distances of "other authors" to Sanayi, while the golden line shows distances between "Book of Love" and Sanayi. The golden line quickly leaves the space of Sanayi plausibility and approaches distances of "others" (Iraqi and Shirazi).
+
+
+## Supplement
+
+Craig's Zeta to look at the distinctive, not that frequent words. 
+
+```{r,include=F}
+res=oppose(primary.corpus.dir = "data/primary_set/",
+           secondary.corpus.dir = "data/secondary_set/",
+           corpus.lang="Other")
+```
+
+
+```{r,fig.height=10,fig.width=6}
+x=res$words.avoided[1:40]
+y=res$words.preferred[1:40]
+score_x =res$words.avoided.scores[1:40]
+score_y = res$words.preferred.scores[1:40]
+
+tibble(word = c(x,y), score=c(score_x, score_y)) %>% mutate(direction = ifelse(score > 0, "Ishqname", "Sanayi")) %>%  ggplot(aes(score,reorder(word,score), fill=direction)) + geom_col() + scale_fill_paletteer_d("wesanderson::GrandBudapest1") + theme_minimal() + theme(axis.text.y = element_text(size=15)) + labs(y="",title="Sanā’ī vs.  Ishq-nāme,lexical differences")
+
+ggsave("plots_pub/figS1_lexical_diff.tiff",width = 5,height = 9)
+```
